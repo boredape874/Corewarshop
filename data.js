@@ -43,7 +43,7 @@ window.shopData = {
       category: '기본 아이템',
       tags: ['인기'],
       // 'images' 폴더 안에 'hp-potion.jpg' 라는 파일이 있어야 합니다.
-      image: './images/hp-potion.jpg',
+      image: './Images/제목을-입력해주세요_-001(27).png',
     },
     // ------------ 상품 2 끝 ------------
     
