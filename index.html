@@ -3,370 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>코어 국가전쟁 후원템 상점 (Toss Style)</title>
+    <title>코어 국가전쟁 후원템 상점</title>
     <!-- Tailwind CSS CDN 로드 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Inter 폰트 설정 -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
     <style>
-        /* Toss 스타일: 깔끔한 배경, Inter 폰트 사용 */
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7f7f9; /* 아주 미세한 회색 */
-            transition: background-color 0.3s, color 0.3s;
+            background-color: #f7f7f9;
         }
-        /* 다크 모드 스타일 */
         .dark body { background-color: #1a1a2e; }
         .dark .card-bg { background-color: #2c2c45; }
         .dark .text-primary { color: #f7f7f9; }
-        .dark .btn-primary { background-color: #5b5b9c; }
-        .dark .btn-primary:hover { background-color: #6e6ee0; }
-        .dark input, .dark textarea, .dark select { background-color: #3f3f5a; border-color: #555577; }
-        
-        /* 폰트 크기 및 간격 조정으로 모던함 강조 */
         .header-text { font-size: 2.5rem; line-height: 1.1; font-weight: 800; }
-        
-        /* 스크롤 시 상단 그림자 */
         .scrolled-header { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); }
     </style>
-    
-    <!-- Firebase SDK (필수) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        
-        setLogLevel('Debug');
 
+    <!-- !!! 중요: 데이터 파일 로드 !!! -->
+    <!-- Firebase 대신 이 파일을 읽어서 상품 정보를 가져옵니다. -->
+    <script src="./data.js"></script>
+    
+    <script type="module">
         // ====== Global Configuration and State ======
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'core-war-shop';
-        
-        // 🚨🚨🚨 중요! GitHub Pages 배포 시 이 부분을 사용자님의 실제 Firebase 설정으로 교체해야 합니다. 🚨🚨🚨
-        // YOUR_FIREBASE_CONFIG_HERE를 복사한 실제 Firebase Config 객체로 대체하세요.
-        const EXTERNAL_FIREBASE_CONFIG = { 
-            // 예시: apiKey: "AIzaSy...", authDomain: "my-project-1234.firebaseapp.com", ...
-            projectId: 'default-project' // 현재는 더미입니다. 이 줄을 포함하여 전체를 교체하세요.
-        };
-        
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? JSON.parse(__firebase_config) 
-            : EXTERNAL_FIREBASE_CONFIG;
-        
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-        
-        // 구매하기 버튼 클릭 시 이동할 URL
+        // 구매하기 버튼 클릭 시 이동할 카카오톡 채팅 URL
         const KAKAO_CHAT_URL = "http://pf.kakao.com/_VHjxin/chat";
         
-        // 관리자 비밀번호
-        const ADMIN_PASSWORD = "1818"; 
-
-        let db;
-        let auth;
-        let currentUserId = null;
-        let isAdmin = false;
-
-        // Reactive State
+        // 앱의 상태를 관리하는 객체
         window.shopState = {
             products: [],
             categories: [],
             tags: [],
             selectedCategory: 'all',
-            isModalOpen: false,
-            isLoginModalOpen: false,
-            editingProduct: null,
-            error: null
         };
         
-        // ====== Path Definitions ======
-        
-        const getProductsCollectionRef = () => collection(db, `artifacts/${appId}/public/data/products`);
-        const getConfigDocRef = () => doc(db, `artifacts/${appId}/public/data/settings`, 'config');
-        
-        // ====== Initialization and Auth ======
+        // ====== Initialization and Data Loading ======
 
-        async function initFirebase() {
-            try {
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                await setPersistence(auth, browserSessionPersistence);
-                
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        currentUserId = user.uid;
-                    } else {
-                        currentUserId = crypto.randomUUID();
-                    }
-                    document.getElementById('current-user-id').textContent = currentUserId;
-                    startDataListeners();
-                    if (isAdmin) {
-                        document.getElementById('admin-login-btn').classList.add('hidden');
-                        document.getElementById('admin-logout-btn').classList.remove('hidden');
-                        renderAdminDashboard();
-                    }
-                });
-
-            } catch (error) {
-                console.error("Firebase 초기화 중 오류 발생:", error);
-                // Firebase 초기화 실패 시 사용자에게 안내
-                showNotification("데이터베이스 초기화 실패. 설정(Config)을 확인해주세요.", 'error');
-            }
-        }
-        
-        // ====== Data Listener (Real-time Fetch) ======
-
-        function startDataListeners() {
-            if (!db) return;
-
-            // 1. 상품 데이터 리스너
-            onSnapshot(getProductsCollectionRef(), (snapshot) => {
-                const products = [];
-                snapshot.forEach((doc) => {
-                    products.push({ id: doc.id, ...doc.data() });
-                });
-                window.shopState.products = products;
-                renderShop();
-            }, (error) => {
-                console.error("상품 데이터 불러오기 오류:", error);
-                showNotification("상품 데이터 로드 실패.", 'error');
-            });
-
-            // 2. 설정 데이터 (카테고리, 태그) 리스너
-            onSnapshot(getConfigDocRef(), (doc) => {
-                if (doc.exists()) {
-                    const data = doc.data();
-                    window.shopState.categories = data.categories || [];
-                    window.shopState.tags = data.tags || [];
-                } else {
-                    // 최초 실행 시 기본 설정 문서 생성
-                    setDoc(getConfigDocRef(), { categories: ['기본', '이벤트'], tags: ['HOT', 'NEW'] });
-                }
-                renderShop();
-                if (isAdmin) renderAdminDashboard();
-            }, (error) => {
-                console.error("설정 데이터 불러오기 오류:", error);
-            });
-        }
-        
-        // ====== Admin Management Functions ======
-        
-        function getFormData(form) {
-            const formData = new FormData(form);
-            const data = {};
-            formData.forEach((value, key) => {
-                data[key] = value;
-            });
-            data.tags = formData.getAll('tags');
-            data.category = data.category || window.shopState.categories[0] || '기본';
-            return data;
-        }
-
-        function fileToBase64(file) {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = (error) => reject(error);
-                reader.readAsDataURL(file);
-            });
-        }
-        
-        window.saveProduct = async (event) => {
-            event.preventDefault();
-            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
-            if (!db) return showNotification("데이터베이스 연결 실패. 설정을 확인하세요.", 'error');
-
-            const form = event.target;
-            const data = getFormData(form);
-            const imageFile = form.querySelector('#product-image').files[0];
-            const productId = window.shopState.editingProduct ? window.shopState.editingProduct.id : null;
-
-            try {
-                showNotification("상품 정보를 저장 중입니다...", 'loading');
-
-                if (imageFile) {
-                    if (imageFile.size > 1024 * 1024) { // 1MB 제한
-                        showNotification("이미지 크기는 1MB를 초과할 수 없습니다.", 'error');
-                        return;
-                    }
-                    data.image = await fileToBase64(imageFile);
-                } else if (productId && window.shopState.editingProduct && window.shopState.editingProduct.image) {
-                    data.image = window.shopState.editingProduct.image;
-                } else {
-                    // Placeholder (Toss-like minimal card)
-                    data.image = `https://placehold.co/400x300/e6e7eb/313180?text=${encodeURIComponent(data.title.substring(0, 10))}%20No%20Image`;
-                }
-                
-                const productToSave = {
-                    title: data.title,
-                    content: data.content,
-                    category: data.category,
-                    tags: data.tags || [],
-                    image: data.image,
-                    createdAt: productId ? window.shopState.editingProduct.createdAt : new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                };
-
-                if (productId) {
-                    await updateDoc(doc(getProductsCollectionRef(), productId), productToSave);
-                    showNotification("상품이 성공적으로 수정되었습니다.", 'success');
-                } else {
-                    await addDoc(getProductsCollectionRef(), productToSave);
-                    showNotification("상품이 성공적으로 등록되었습니다.", 'success');
-                }
-
-                closeModal();
-                window.shopState.editingProduct = null;
-            } catch (error) {
-                console.error("상품 저장 오류:", error);
-                showNotification(`상품 저장 중 오류 발생: ${error.message}`, 'error');
-            }
-        };
-        
-        window.deleteProduct = async (productId) => {
-            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
-             if (!db) return showNotification("데이터베이스 연결 실패. 설정을 확인하세요.", 'error');
+        function initApp() {
+            // data.js 파일에 정의된 전역 변수 window.shopData를 사용합니다.
+            const data = window.shopData;
             
-            showConfirmationModal("정말 이 상품을 삭제하시겠습니까? 되돌릴 수 없습니다.", async () => {
-                try {
-                    await deleteDoc(doc(getProductsCollectionRef(), productId));
-                    showNotification("상품이 삭제되었습니다.", 'success');
-                    closeModal('confirm-modal');
-                } catch (error) {
-                    console.error("상품 삭제 오류:", error);
-                    showNotification(`상품 삭제 중 오류 발생: ${error.message}`, 'error');
-                }
-            });
-        };
-
-        window.saveConfig = async (configType) => {
-            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
-            if (!db) return showNotification("데이터베이스 연결 실패. 설정을 확인하세요.", 'error');
-            
-            const inputId = configType === 'category' ? 'new-category-name' : 'new-tag-name';
-            const newName = document.getElementById(inputId).value.trim();
-
-            if (!newName) return showNotification("이름을 입력해주세요.", 'warning');
-
-            try {
-                const currentConfig = { categories: [...window.shopState.categories], tags: [...window.shopState.tags] };
-                
-                let updated = false;
-                if (configType === 'category' && !currentConfig.categories.includes(newName)) {
-                    currentConfig.categories.push(newName);
-                    updated = true;
-                } else if (configType === 'tag' && !currentConfig.tags.includes(newName)) {
-                    currentConfig.tags.push(newName);
-                    updated = true;
-                }
-                
-                if (updated) {
-                    await setDoc(getConfigDocRef(), currentConfig);
-                    document.getElementById(inputId).value = '';
-                    showNotification(`${configType === 'category' ? '카테고리' : '태그'}가 추가되었습니다.`, 'success');
-                } else {
-                    showNotification("이미 존재하는 이름입니다.", 'warning');
-                }
-                
-            } catch (error) {
-                console.error("설정 저장 오류:", error);
-                showNotification("설정 저장 중 오류 발생.", 'error');
+            if (!data) {
+                console.error("상품 데이터(data.js)를 불러오지 못했습니다. 파일이 존재하는지 확인해주세요.");
+                showNotification("상품 데이터를 불러올 수 없습니다.", "error");
+                return;
             }
-        };
+
+            // 전역 상태에 상품, 카테고리, 태그 정보를 저장합니다.
+            window.shopState.products = data.products || [];
+            window.shopState.categories = data.config.categories || [];
+            window.shopState.tags = data.config.tags || [];
+
+            // 데이터를 모두 불러온 후, 화면에 상점을 렌더링합니다.
+            renderShop();
+        }
         
-        window.deleteConfig = async (configType, name) => {
-             if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
-             if (!db) return showNotification("데이터베이스 연결 실패. 설정을 확인하세요.", 'error');
-             
-             const currentConfig = { categories: [...window.shopState.categories], tags: [...window.shopState.tags] };
-             
-             try {
-                if (configType === 'category') {
-                     currentConfig.categories = currentConfig.categories.filter(c => c !== name);
-                } else if (configType === 'tag') {
-                     currentConfig.tags = currentConfig.tags.filter(t => t !== name);
-                }
-                
-                await setDoc(getConfigDocRef(), currentConfig);
-                showNotification(`${configType === 'category' ? '카테고리' : '태그'}가 삭제되었습니다.`, 'success');
-                
-             } catch (error) {
-                console.error("설정 삭제 오류:", error);
-                showNotification("설정 삭제 중 오류 발생.", 'error');
-             }
-        };
+        // ====== Purchase Logic ======
         
-        // ====== Purchase Logic (Updated) ======
-        
-        // 이제 purchaseItem은 알림만 표시하고, 실제 이동은 HTML <a> 태그에서 처리합니다.
+        // 구매 버튼 클릭 시 알림을 표시하는 함수
         window.purchaseItem = (productName) => {
             showNotification(`'${productName}' 구매를 위해 카카오톡 채팅으로 이동합니다.`, 'info');
         };
         
-        // ====== Admin Login Logic (Demo) ======
-        
-        window.openLoginModal = () => {
-             window.shopState.isLoginModalOpen = true;
-             renderLoginModal();
-        };
-        
-        window.closeLoginModal = () => {
-             window.shopState.isLoginModalOpen = false;
-             renderLoginModal();
-        };
-
-        window.adminLogin = (event) => {
-            event.preventDefault();
-            const password = document.getElementById('admin-password').value;
-
-            if (password === ADMIN_PASSWORD) {
-                isAdmin = true;
-                window.closeLoginModal();
-                renderAdminDashboard();
-                document.getElementById('admin-login-btn').classList.add('hidden');
-                document.getElementById('admin-logout-btn').classList.remove('hidden');
-                showNotification("관리자로 로그인했습니다.", 'success');
-                renderShop();
-            } else {
-                showNotification("비밀번호가 틀렸습니다.", 'error');
-                document.getElementById('admin-password').value = '';
-            }
-        };
-        
-        window.adminLogout = () => {
-            isAdmin = false;
-            renderAdminDashboard();
-            document.getElementById('admin-login-btn').classList.remove('hidden');
-            document.getElementById('admin-logout-btn').classList.add('hidden');
-            showNotification("로그아웃했습니다.", 'info');
-            renderShop();
-        };
-
-        // ====== Modal Functions ======
-        
-        window.openModal = (product = null) => {
-            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
-            window.shopState.editingProduct = product;
-            window.shopState.isModalOpen = true;
-            renderProductModal();
-        };
-
-        window.closeModal = (id = 'product-modal') => {
-            window.shopState.isModalOpen = false;
-            window.shopState.editingProduct = null;
-            
-            const modal = document.getElementById(id);
-            if (modal) modal.classList.add('hidden');
-        };
-
         // ====== UI Rendering Functions ======
         
         function showNotification(message, type = 'info') {
@@ -374,10 +73,8 @@
             let bgColor;
             
             switch (type) {
-                case 'success': bgColor = 'bg-blue-600'; break; /* Toss-like Blue */
+                case 'success': bgColor = 'bg-blue-600'; break;
                 case 'error': bgColor = 'bg-red-600'; break;
-                case 'warning': bgColor = 'bg-yellow-600'; break;
-                case 'loading': bgColor = 'bg-gray-600'; break;
                 default: bgColor = 'bg-gray-500';
             }
             
@@ -385,29 +82,10 @@
             notification.className = `fixed bottom-4 right-4 p-4 rounded-xl shadow-2xl text-white transition-opacity duration-300 z-[100] ${bgColor}`;
             notification.classList.remove('opacity-0', 'hidden');
 
-            if (type !== 'loading') {
-                setTimeout(() => {
-                    notification.classList.add('opacity-0');
-                    setTimeout(() => notification.classList.add('hidden'), 300);
-                }, 3000);
-            }
-        }
-        
-        function showConfirmationModal(message, onConfirm) {
-            const modalHtml = `
-                <div id="confirm-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
-                    <div class="bg-white card-bg p-8 rounded-3xl shadow-2xl max-w-sm w-full transition-all">
-                        <h3 class="text-xl font-bold mb-4 text-red-600 dark:text-red-400">삭제 확인</h3>
-                        <p class="text-gray-700 dark:text-gray-300 mb-8">${message}</p>
-                        <div class="flex justify-end space-x-3">
-                            <button onclick="closeModal('confirm-modal')" class="px-4 py-3 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition">취소</button>
-                            <button id="confirm-modal-btn" class="px-4 py-3 text-white bg-red-600 rounded-xl hover:bg-red-700 transition font-semibold">삭제</button>
-                        </div>
-                    </div>
-                </div>
-            `;
-            document.getElementById('modal-container').innerHTML += modalHtml;
-            document.getElementById('confirm-modal-btn').onclick = onConfirm;
+            setTimeout(() => {
+                notification.classList.add('opacity-0');
+                setTimeout(() => notification.classList.add('hidden'), 300);
+            }, 3000);
         }
 
         /**
@@ -418,27 +96,14 @@
             const categoryNav = document.getElementById('category-nav');
             const { products, categories, selectedCategory } = window.shopState;
             
-            if (!productsContainer) return;
+            if (!productsContainer || !categoryNav) return;
             
-            // 1. 카테고리 네비게이션 렌더링 (칩 스타일)
+            // 1. 카테고리 네비게이션 렌더링
             const categoryHtml = `
-                <button onclick="window.shopState.selectedCategory = 'all'; renderShop();" class="
-                    ${selectedCategory === 'all' 
-                        ? 'bg-indigo-600 text-white' 
-                        : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'} 
-                    px-4 py-2 rounded-full font-semibold text-sm hover:opacity-80 transition
-                ">전체</button>
-                ${categories.map(cat => {
-                    const isActive = selectedCategory === cat;
-                    return `
-                        <button onclick="window.shopState.selectedCategory = '${cat}'; renderShop();" class="
-                            ${isActive
-                                ? 'bg-indigo-600 text-white' 
-                                : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'} 
-                            px-4 py-2 rounded-full font-semibold text-sm hover:opacity-80 transition
-                        ">${cat}</button>
-                    `;
-                }).join('')}
+                <button onclick="window.shopState.selectedCategory = 'all'; renderShop();" class="${selectedCategory === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'} px-4 py-2 rounded-full font-semibold text-sm hover:opacity-80 transition">전체</button>
+                ${categories.map(cat => `
+                    <button onclick="window.shopState.selectedCategory = '${cat}'; renderShop();" class="${selectedCategory === cat ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700'} px-4 py-2 rounded-full font-semibold text-sm hover:opacity-80 transition">${cat}</button>
+                `).join('')}
             `;
             categoryNav.innerHTML = categoryHtml;
             
@@ -448,257 +113,43 @@
                 : products.filter(p => p.category === selectedCategory);
                 
             if (filteredProducts.length === 0) {
-                 productsContainer.innerHTML = `<div class="md:col-span-3 text-center py-20 text-xl font-medium text-gray-500 dark:text-gray-400">해당 카테고리에 등록된 상품이 없습니다.</div>`;
+                 productsContainer.innerHTML = `<div class="md:col-span-2 text-center py-20 text-xl font-medium text-gray-500">해당 카테고리에 상품이 없습니다.</div>`;
                  return;
             }
 
             productsContainer.innerHTML = filteredProducts.map(product => `
                 <div class="bg-white card-bg rounded-3xl shadow-xl overflow-hidden flex flex-col transition transform hover:shadow-2xl hover:scale-[1.01]">
-                    <div class="w-full h-48 bg-gray-100 dark:bg-gray-700 overflow-hidden relative">
-                        <!-- 이미지 -->
-                        <img src="${product.image}" onerror="this.onerror=null;this.src='https://placehold.co/400x300/e6e7eb/313180?text=${encodeURIComponent(product.title.substring(0, 10))}%20No%20Image';" 
+                    <div class="w-full h-48 bg-gray-100 overflow-hidden relative">
+                        <img src="${product.image}" onerror="this.onerror=null;this.src='https://placehold.co/400x300/e6e7eb/313180?text=Image%20Error';" 
                              alt="${product.title}" class="w-full h-full object-cover transition-transform duration-500 hover:scale-105">
-                        
-                        <!-- 카테고리 태그 -->
-                        <div class="absolute top-3 left-3 bg-white dark:bg-gray-800 text-xs font-bold text-indigo-600 dark:text-indigo-400 px-3 py-1 rounded-full shadow-md">
-                            ${product.category}
-                        </div>
+                        <div class="absolute top-3 left-3 bg-white text-xs font-bold text-indigo-600 px-3 py-1 rounded-full shadow-md">${product.category}</div>
                     </div>
                     
                     <div class="p-6 flex flex-col flex-grow">
                         <h3 class="text-xl font-extrabold mb-2 dark:text-white">${product.title}</h3>
                         <p class="text-gray-500 dark:text-gray-400 text-sm mb-4 flex-grow">${product.content}</p>
                         
-                        <!-- 태그 목록 -->
                         <div class="flex flex-wrap gap-2 mb-4">
-                            ${(product.tags || []).map(tag => `<span class="text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full">${tag}</span>`).join('')}
+                            ${(product.tags || []).map(tag => `<span class="text-xs text-gray-600 bg-gray-100 px-3 py-1 rounded-full">${tag}</span>`).join('')}
                         </div>
 
-                        <!-- 버튼 그룹 -->
-                        <div class="flex ${isAdmin ? 'justify-between' : 'justify-center'} items-center mt-auto pt-4 border-t border-gray-100 dark:border-gray-700">
-                            <!-- 구매 버튼 (일반 사용자) - <a> 태그로 안정적인 새 탭 열기 구현 -->
-                            <a href="${KAKAO_CHAT_URL}" target="_blank" onclick="purchaseItem('${product.title}')"
-                                class="text-center px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition transform hover:scale-[1.01] ${isAdmin ? 'w-full mr-2' : 'w-full'}">
+                        <div class="flex justify-center items-center mt-auto pt-4 border-t border-gray-100">
+                            <a href="${KAKAO_CHAT_URL}" target="_blank" onclick="purchaseItem('${product.title.replace(/'/g, "\\'")}')"
+                                class="w-full text-center px-6 py-3 bg-indigo-600 text-white font-semibold rounded-xl shadow-lg hover:bg-indigo-700 transition transform hover:scale-[1.01]">
                                 구매하기 (카톡 문의)
                             </a>
-                            
-                            <!-- 관리자 버튼 -->
-                            ${isAdmin ? `
-                                <div class="flex space-x-2 ml-3">
-                                    <button onclick="openModal(${JSON.stringify(product).replace(/"/g, '&quot;')})" 
-                                            class="p-3 bg-yellow-500 text-white rounded-xl hover:bg-yellow-600 transition text-sm font-semibold">수정</button>
-                                    <button onclick="deleteProduct('${product.id}')" 
-                                            class="p-3 bg-red-500 text-white rounded-xl hover:bg-red-600 transition text-sm font-semibold">삭제</button>
-                                </div>
-                            ` : ''}
                         </div>
                     </div>
                 </div>
             `).join('');
         }
-        
-        /**
-         * 관리자 대시보드 렌더링
-         */
-        function renderAdminDashboard() {
-            const adminDashboard = document.getElementById('admin-dashboard');
-            
-            if (!adminDashboard) return;
-
-            if (isAdmin) {
-                adminDashboard.classList.remove('hidden');
-            } else {
-                adminDashboard.classList.add('hidden');
-                return;
-            }
-            
-            const { categories, tags, products } = window.shopState;
-
-            // 카테고리/태그 관리 UI 렌더링
-            const configHtml = `
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
-                    <!-- 카테고리 관리 -->
-                    <div class="bg-white card-bg p-6 rounded-2xl shadow-lg">
-                        <h4 class="text-xl font-bold mb-4 dark:text-white">카테고리 관리 (${categories.length})</h4>
-                        <form onsubmit="event.preventDefault(); saveConfig('category');" class="flex gap-2 mb-4">
-                            <input type="text" id="new-category-name" placeholder="새 카테고리 이름" class="flex-grow p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white text-sm">
-                            <button type="submit" class="p-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition font-semibold text-sm">추가</button>
-                        </form>
-                        <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
-                            ${categories.map(cat => `
-                                <div class="flex items-center bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 px-3 py-1 rounded-full text-sm font-medium">
-                                    ${cat}
-                                    <button onclick="deleteConfig('category', '${cat}')" class="ml-2 text-red-500 hover:text-red-700 transition">×</button>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-
-                    <!-- 태그 관리 -->
-                    <div class="bg-white card-bg p-6 rounded-2xl shadow-lg">
-                        <h4 class="text-xl font-bold mb-4 dark:text-white">태그 관리 (${tags.length})</h4>
-                        <form onsubmit="event.preventDefault(); saveConfig('tag');" class="flex gap-2 mb-4">
-                            <input type="text" id="new-tag-name" placeholder="새 태그 이름" class="flex-grow p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white text-sm">
-                            <button type="submit" class="p-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition font-semibold text-sm">추가</button>
-                        </form>
-                        <div class="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
-                            ${tags.map(tag => `
-                                <div class="flex items-center bg-purple-100 dark:bg-purple-900/50 text-purple-800 dark:text-purple-300 px-3 py-1 rounded-full text-sm font-medium">
-                                    ${tag}
-                                    <button onclick="deleteConfig('tag', '${tag}')" class="ml-2 text-red-500 hover:text-red-700 transition">×</button>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 상품 목록 관리 -->
-                <div class="bg-white card-bg p-6 rounded-2xl shadow-lg">
-                    <div class="flex justify-between items-center mb-6">
-                        <h4 class="text-2xl font-bold dark:text-white">전체 상품 목록 (${products.length})</h4>
-                        <button onclick="openModal()" class="px-4 py-3 bg-indigo-600 text-white rounded-xl shadow-md hover:bg-indigo-700 transition font-semibold">
-                            + 새 상품 등록
-                        </button>
-                    </div>
-                    <div class="space-y-3 max-h-80 overflow-y-auto">
-                        ${products.map(product => `
-                            <div class="flex items-center justify-between p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-800">
-                                <div class="flex-grow min-w-0">
-                                    <p class="font-semibold dark:text-white truncate">${product.title}</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">${product.category} | ${product.tags.join(', ')}</p>
-                                </div>
-                                <div class="flex space-x-2 ml-4 flex-shrink-0">
-                                    <button onclick="openModal(${JSON.stringify(product).replace(/"/g, '&quot;')})" 
-                                            class="p-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition text-xs font-semibold">수정</button>
-                                    <button onclick="deleteProduct('${product.id}')" 
-                                            class="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition text-xs font-semibold">삭제</button>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-            
-            adminDashboard.innerHTML = configHtml;
-        }
-
-        /**
-         * 상품 등록/수정 모달 렌더링
-         */
-        function renderProductModal() {
-            const container = document.getElementById('modal-container');
-            if (!container) return;
-            
-            const product = window.shopState.editingProduct;
-            const isEditing = !!product;
-            const { categories, tags } = window.shopState;
-
-            const formHtml = `
-                <div id="product-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 ${window.shopState.isModalOpen ? '' : 'hidden'}">
-                    <div class="bg-white card-bg p-8 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[95vh] overflow-y-auto transition-all duration-300">
-                        <div class="flex justify-between items-center mb-6 border-b pb-3 border-gray-100 dark:border-gray-700">
-                            <h3 class="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">${isEditing ? '상품 수정' : '새 상품 등록'}</h3>
-                            <button onclick="closeModal()" class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-3xl leading-none">×</button>
-                        </div>
-                        
-                        <form onsubmit="saveProduct(event)">
-                            <!-- 제목 -->
-                            <div class="mb-4">
-                                <label for="product-title" class="block text-sm font-semibold mb-2 dark:text-gray-300">상품 제목</label>
-                                <input type="text" id="product-title" name="title" required value="${product?.title || ''}"
-                                       class="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white">
-                            </div>
-                            
-                            <!-- 내용 -->
-                            <div class="mb-4">
-                                <label for="product-content" class="block text-sm font-semibold mb-2 dark:text-gray-300">상품 내용</label>
-                                <textarea id="product-content" name="content" rows="3" required
-                                          class="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white">${product?.content || ''}</textarea>
-                            </div>
-                            
-                            <!-- 카테고리 -->
-                            <div class="mb-4">
-                                <label for="product-category" class="block text-sm font-semibold mb-2 dark:text-gray-300">카테고리 설정</label>
-                                <select id="product-category" name="category" required 
-                                        class="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white">
-                                    ${categories.map(cat => `<option value="${cat}" ${product?.category === cat ? 'selected' : ''}>${cat}</option>`).join('')}
-                                </select>
-                            </div>
-                            
-                            <!-- 태그 -->
-                            <div class="mb-4">
-                                <label class="block text-sm font-semibold mb-2 dark:text-gray-300">태그 선택 (다중 선택 가능)</label>
-                                <div class="flex flex-wrap gap-2 p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700">
-                                    ${tags.map(tag => {
-                                        const isSelected = product?.tags?.includes(tag) || false;
-                                        return `
-                                            <label class="flex items-center space-x-2 cursor-pointer bg-gray-100 dark:bg-gray-800 px-3 py-1 rounded-full">
-                                                <input type="checkbox" name="tags" value="${tag}" ${isSelected ? 'checked' : ''}
-                                                       class="rounded text-indigo-600 dark:text-indigo-400 focus:ring-indigo-500">
-                                                <span class="text-sm dark:text-gray-300">${tag}</span>
-                                            </label>
-                                        `;
-                                    }).join('')}
-                                </div>
-                            </div>
-                            
-                            <!-- 이미지 업로드 -->
-                            <div class="mb-6">
-                                <label for="product-image" class="block text-sm font-semibold mb-2 dark:text-gray-300">상품 이미지 (최대 1MB 권장)</label>
-                                <input type="file" id="product-image" name="image" accept="image/*" class="w-full text-sm text-gray-500 dark:text-gray-400
-                                       file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold
-                                       file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 transition">
-                                ${isEditing && product.image ? `<p class="text-xs mt-2 dark:text-gray-400">현재 이미지가 있습니다. 변경하려면 새 파일을 업로드하세요.</p>` : ''}
-                            </div>
-                            
-                            <!-- 저장 버튼 -->
-                            <button type="submit" class="w-full py-4 btn-primary bg-indigo-600 text-white font-extrabold rounded-2xl shadow-lg hover:bg-indigo-700 transition transform hover:scale-[1.005]">
-                                ${isEditing ? '상품 수정 완료' : '새 상품 등록'}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            `;
-            container.innerHTML = formHtml;
-        }
-
-        /**
-         * 관리자 로그인 모달 렌더링
-         */
-        function renderLoginModal() {
-            const container = document.getElementById('login-modal-container');
-            if (!container) return;
-
-            const modalHtml = `
-                <div id="login-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center p-4 z-50 ${window.shopState.isLoginModalOpen ? '' : 'hidden'}">
-                    <div class="bg-white card-bg p-8 rounded-3xl shadow-2xl max-w-sm w-full transition-all duration-300">
-                        <div class="flex justify-between items-center mb-6">
-                            <h3 class="text-2xl font-extrabold text-indigo-600 dark:text-indigo-400">관리자 로그인</h3>
-                            <button onclick="closeLoginModal()" class="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-3xl leading-none">×</button>
-                        </div>
-                        
-                        <form onsubmit="adminLogin(event)">
-                            <div class="mb-6">
-                                <label for="admin-password" class="block text-sm font-semibold mb-2 dark:text-gray-300">비밀번호</label>
-                                <input type="password" id="admin-password" required
-                                       class="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white">
-                            </div>
-                            
-                            <button type="submit" class="w-full py-4 btn-primary bg-indigo-600 text-white font-extrabold rounded-xl shadow-lg hover:bg-indigo-700 transition transform hover:scale-[1.005]">
-                                로그인
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            `;
-            container.innerHTML = modalHtml;
-        }
 
         // ====== Main Application Entry Point ======
 
         document.addEventListener('DOMContentLoaded', () => {
-            initFirebase();
-            // 스크롤 이벤트 리스너 추가
+            initApp();
+            
+            // 스크롤 시 헤더에 그림자 효과 추가
             window.addEventListener('scroll', () => {
                 const header = document.querySelector('header');
                 if (window.scrollY > 10) {
@@ -710,68 +161,37 @@
         });
         
     </script>
+</head>
+<body class="text-gray-800">
 
-    <!-- UI Structure -->
     <div class="min-h-screen">
         
-        <!-- 네비게이션 및 헤더 -->
-        <header class="bg-white dark:bg-gray-800 sticky top-0 z-40 transition-shadow">
+        <header class="bg-white sticky top-0 z-40 transition-shadow">
             <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex justify-between items-center">
-                <h1 class="header-text text-indigo-600 dark:text-indigo-400 font-extrabold">CORE SHOP</h1>
-                <div class="flex items-center space-x-4">
-                    <!-- 유저 ID 표시 (디버그용) -->
-                    <p class="text-xs text-gray-400 hidden sm:block">ID: <span id="current-user-id">...</span></p>
-                    <!-- 로그아웃 버튼 (관리자 로그인 시 노출) -->
-                    <button onclick="adminLogout()" id="admin-logout-btn" 
-                            class="px-3 py-1 bg-red-500 text-white rounded-full shadow-md hover:bg-red-600 transition text-sm hidden">
-                        로그아웃
-                    </button>
-                    <!-- 다크 모드 토글 버튼 (옵션) -->
-                    <!-- <button onclick="toggleDarkMode()" class="text-gray-700 dark:text-gray-300 hover:text-indigo-600 transition">🌙</button> -->
-                </div>
+                <h1 class="header-text text-indigo-600 font-extrabold">CORE SHOP</h1>
             </div>
         </header>
 
         <main class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
             
-            <h2 class="text-4xl font-extrabold text-center mb-10 dark:text-white">
+            <h2 class="text-4xl font-extrabold text-center mb-10">
                 코어 국가전쟁 후원 아이템
             </h2>
-            <p class="text-center text-lg text-gray-500 dark:text-gray-400 mb-12">
+            <p class="text-center text-lg text-gray-500 mb-12">
                 후원해 주신 금액은 서버 유지 및 개발에 사용됩니다. 감사드립니다.
             </p>
 
-            <!-- 카테고리 네비게이션 -->
             <nav id="category-nav" class="flex flex-wrap justify-center gap-3 mb-16"></nav>
 
-            <!-- 상품 목록 컨테이너 -->
             <section id="products-container" class="grid grid-cols-1 md:grid-cols-2 gap-8"></section>
-
-            <!-- 관리자 대시보드 (isAdmin=true일 때 표시) -->
-            <section id="admin-dashboard" class="mt-20 border-t-2 border-dashed border-gray-300 dark:border-gray-700 pt-10 hidden">
-                <div class="flex justify-between items-center mb-10">
-                    <h2 class="text-3xl font-extrabold dark:text-white">관리자 대시보드</h2>
-                </div>
-                <!-- 여기에 configHtml + productListHtml이 렌더링됨 -->
-            </section>
             
         </main>
         
-        <!-- 하단 관리자 로그인 버튼 (작고 숨겨진 형태) -->
-        <div class="py-10 text-center">
-             <button onclick="openLoginModal()" id="admin-login-btn" 
-                     class="text-xs text-gray-400 dark:text-gray-600 hover:text-indigo-600 dark:hover:text-indigo-400 transition underline">
-                관리자 모드
-            </button>
-        </div>
+        <footer class="text-center py-10 text-gray-400 text-sm">
+            &copy; 2025 CORE WAR. All Rights Reserved.
+        </footer>
 
     </div>
-
-    <!-- 모달 컨테이너 (관리자 상품 모달 및 확인 모달) -->
-    <div id="modal-container"></div>
-    
-    <!-- 로그인 모달 컨테이너 -->
-    <div id="login-modal-container"></div>
 
     <!-- 알림 메시지 (Toast) -->
     <div id="notification" class="fixed bottom-4 right-4 p-3 rounded-lg shadow-lg text-white opacity-0 hidden transition-opacity duration-300 z-[100]"></div>
