@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ko" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>코어 국가전쟁 후원템 상점 (Toss Style)</title>
+    <!-- Tailwind CSS CDN 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter 폰트 설정 -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap">
+    <style>
+        /* Toss 스타일: 깔끔한 배경, Inter 폰트 사용 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f7f9; /* 아주 미세한 회색 */
+            transition: background-color 0.3s, color 0.3s;
+        }
+        /* 다크 모드 스타일 */
+        .dark body { background-color: #1a1a2e; }
+        .dark .card-bg { background-color: #2c2c45; }
+        .dark .text-primary { color: #f7f7f9; }
+        .dark .btn-primary { background-color: #5b5b9c; }
+        .dark .btn-primary:hover { background-color: #6e6ee0; }
+        .dark input, .dark textarea, .dark select { background-color: #3f3f5a; border-color: #555577; }
+        
+        /* 폰트 크기 및 간격 조정으로 모던함 강조 */
+        .header-text { font-size: 2.5rem; line-height: 1.1; font-weight: 800; }
+        
+        /* 스크롤 시 상단 그림자 */
+        .scrolled-header { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03); }
+    </style>
+    
+    <!-- Firebase SDK (필수) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, collection, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        setLogLevel('Debug');
+
+        // ====== Global Configuration and State ======
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'core-war-shop';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { projectId: 'default-project' };
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // 구매하기 버튼 클릭 시 이동할 URL
+        const KAKAO_CHAT_URL = "http://pf.kakao.com/_VHjxin/chat";
+        
+        // 관리자 비밀번호
+        const ADMIN_PASSWORD = "1818"; 
+
+        let db;
+        let auth;
+        let currentUserId = null;
+        let isAdmin = false;
+
+        // Reactive State
+        window.shopState = {
+            products: [],
+            categories: [],
+            tags: [],
+            selectedCategory: 'all',
+            isModalOpen: false,
+            isLoginModalOpen: false,
+            editingProduct: null,
+            error: null,
+            // 정렬 상태 추가
+            sortKey: 'createdAt', // 기본 정렬 키: 최신순
+            sortDirection: 'desc' // 기본 정렬 방향: 내림차순
+        };
+        
+        // ====== Path Definitions ======
+        
+        const getProductsCollectionRef = () => collection(db, `artifacts/${appId}/public/data/products`);
+        const getConfigDocRef = () => doc(db, `artifacts/${appId}/public/data/settings`, 'config');
+        
+        // ====== Utility Functions ======
+
+        /**
+         * 숫자를 KRW 형식으로 포맷합니다.
+         */
+        const formatCurrency = (number) => {
+            if (typeof number !== 'number' || isNaN(number)) return '0원';
+            return new Intl.NumberFormat('ko-KR', { style: 'currency', currency: 'KRW' }).format(number);
+        };
+        
+        /**
+         * 상품 목록을 현재 설정된 정렬 기준으로 정렬합니다.
+         */
+        function sortProducts(products, key, direction) {
+            return products.sort((a, b) => {
+                let valA = a[key];
+                let valB = b[key];
+
+                // 가격은 숫자로 비교
+                if (key === 'price') {
+                    valA = parseFloat(valA || 0);
+                    valB = parseFloat(valB || 0);
+                } 
+                // 생성일은 Date 객체로 비교
+                else if (key === 'createdAt') {
+                    valA = new Date(valA).getTime();
+                    valB = new Date(valB).getTime();
+                } 
+                // 나머지는 문자열로 비교
+                else {
+                    valA = String(valA).toLowerCase();
+                    valB = String(valB).toLowerCase();
+                }
+
+                if (valA < valB) return direction === 'asc' ? -1 : 1;
+                if (valA > valB) return direction === 'asc' ? 1 : -1;
+                return 0;
+            });
+        }
+
+        // ====== Initialization and Auth ======
+
+        async function initFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                await setPersistence(auth, browserSessionPersistence);
+                
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        currentUserId = user.uid;
+                    } else {
+                        currentUserId = crypto.randomUUID();
+                    }
+                    document.getElementById('current-user-id').textContent = currentUserId;
+                    startDataListeners();
+                    if (isAdmin) {
+                        document.getElementById('admin-login-btn').classList.add('hidden');
+                        document.getElementById('admin-logout-btn').classList.remove('hidden');
+                        renderAdminDashboard();
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase 초기화 중 오류 발생:", error);
+                showNotification("Firebase 초기화 실패. 콘솔을 확인해주세요.", 'error');
+            }
+        }
+        
+        // ====== Data Listener (Real-time Fetch) ======
+
+        function startDataListeners() {
+            if (!db) return;
+
+            // 1. 상품 데이터 리스너
+            onSnapshot(getProductsCollectionRef(), (snapshot) => {
+                const products = [];
+                snapshot.forEach((doc) => {
+                    products.push({ id: doc.id, ...doc.data() });
+                });
+                window.shopState.products = products;
+                renderShop();
+            }, (error) => {
+                console.error("상품 데이터 불러오기 오류:", error);
+                showNotification("상품 데이터 로드 실패.", 'error');
+            });
+
+            // 2. 설정 데이터 (카테고리, 태그) 리스너
+            onSnapshot(getConfigDocRef(), (doc) => {
+                if (doc.exists()) {
+                    const data = doc.data();
+                    window.shopState.categories = data.categories || [];
+                    window.shopState.tags = data.tags || [];
+                } else {
+                    // 최초 실행 시 기본 설정 문서 생성
+                    setDoc(getConfigDocRef(), { categories: ['기본', '이벤트'], tags: ['HOT', 'NEW'] });
+                }
+                renderShop();
+                if (isAdmin) renderAdminDashboard();
+            }, (error) => {
+                console.error("설정 데이터 불러오기 오류:", error);
+            });
+        }
+        
+        // ====== Admin Management Functions ======
+        
+        function getFormData(form) {
+            const formData = new FormData(form);
+            const data = {};
+            formData.forEach((value, key) => {
+                data[key] = value;
+            });
+            data.tags = formData.getAll('tags');
+            data.category = data.category || window.shopState.categories[0] || '기본';
+            return data;
+        }
+
+        function fileToBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = (error) => reject(error);
+                reader.readAsDataURL(file);
+            });
+        }
+        
+        window.saveProduct = async (event) => {
+            event.preventDefault();
+            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
+
+            const form = event.target;
+            const data = getFormData(form);
+            const imageFile = form.querySelector('#product-image').files[0];
+            const productId = window.shopState.editingProduct ? window.shopState.editingProduct.id : null;
+
+            try {
+                showNotification("상품 정보를 저장 중입니다...", 'loading');
+
+                if (imageFile) {
+                    if (imageFile.size > 1024 * 1024) { // 1MB 제한
+                        showNotification("이미지 크기는 1MB를 초과할 수 없습니다.", 'error');
+                        return;
+                    }
+                    data.image = await fileToBase64(imageFile);
+                } else if (productId && window.shopState.editingProduct && window.shopState.editingProduct.image) {
+                    data.image = window.shopState.editingProduct.image;
+                } else {
+                    // Placeholder (Toss-like minimal card)
+                    data.image = `https://placehold.co/400x300/e6e7eb/313180?text=${encodeURIComponent(data.title.substring(0, 10))}%20No%20Image`;
+                }
+
+                // 가격 처리: 쉼표 제거 후 숫자로 저장
+                const priceString = String(data.price).replace(/,/g, '');
+                const priceValue = parseFloat(priceString);
+                
+                if (isNaN(priceValue) || priceValue < 0) {
+                     showNotification("가격은 유효한 숫자여야 합니다.", 'error');
+                     return;
+                }
+                
+                const productToSave = {
+                    title: data.title,
+                    content: data.content,
+                    price: priceValue, // 숫자로 저장
+                    category: data.category,
+                    tags: data.tags || [],
+                    image: data.image,
+                    createdAt: productId ? window.shopState.editingProduct.createdAt : new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                };
+
+                if (productId) {
+                    await updateDoc(doc(getProductsCollectionRef(), productId), productToSave);
+                    showNotification("상품이 성공적으로 수정되었습니다.", 'success');
+                } else {
+                    await addDoc(getProductsCollectionRef(), productToSave);
+                    showNotification("상품이 성공적으로 등록되었습니다.", 'success');
+                }
+
+                closeModal();
+                window.shopState.editingProduct = null;
+            } catch (error) {
+                console.error("상품 저장 오류:", error);
+                showNotification(`상품 저장 중 오류 발생: ${error.message}`, 'error');
+            }
+        };
+        
+        window.deleteProduct = async (productId) => {
+            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
+            
+            showConfirmationModal("정말 이 상품을 삭제하시겠습니까? 되돌릴 수 없습니다.", async () => {
+                try {
+                    await deleteDoc(doc(getProductsCollectionRef(), productId));
+                    showNotification("상품이 삭제되었습니다.", 'success');
+                    closeModal('confirm-modal');
+                } catch (error) {
+                    console.error("상품 삭제 오류:", error);
+                    showNotification(`상품 삭제 중 오류 발생: ${error.message}`, 'error');
+                }
+            });
+        };
+
+        window.saveConfig = async (configType) => {
+            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
+            
+            const inputId = configType === 'category' ? 'new-category-name' : 'new-tag-name';
+            const newName = document.getElementById(inputId).value.trim();
+
+            if (!newName) return showNotification("이름을 입력해주세요.", 'warning');
+
+            try {
+                const currentConfig = { categories: [...window.shopState.categories], tags: [...window.shopState.tags] };
+                
+                let updated = false;
+                if (configType === 'category' && !currentConfig.categories.includes(newName)) {
+                    currentConfig.categories.push(newName);
+                    updated = true;
+                } else if (configType === 'tag' && !currentConfig.tags.includes(newName)) {
+                    currentConfig.tags.push(newName);
+                    updated = true;
+                }
+                
+                if (updated) {
+                    await setDoc(getConfigDocRef(), currentConfig);
+                    document.getElementById(inputId).value = '';
+                    showNotification(`${configType === 'category' ? '카테고리' : '태그'}가 추가되었습니다.`, 'success');
+                } else {
+                    showNotification("이미 존재하는 이름입니다.", 'warning');
+                }
+                
+            } catch (error) {
+                console.error("설정 저장 오류:", error);
+                showNotification("설정 저장 중 오류 발생.", 'error');
+            }
+        };
+        
+        window.deleteConfig = async (configType, name) => {
+             if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
+             
+             const currentConfig = { categories: [...window.shopState.categories], tags: [...window.shopState.tags] };
+             
+             try {
+                if (configType === 'category') {
+                     currentConfig.categories = currentConfig.categories.filter(c => c !== name);
+                } else if (configType === 'tag') {
+                     currentConfig.tags = currentConfig.tags.filter(t => t !== name);
+                }
+                
+                await setDoc(getConfigDocRef(), currentConfig);
+                showNotification(`${configType === 'category' ? '카테고리' : '태그'}가 삭제되었습니다.`, 'success');
+                
+             } catch (error) {
+                console.error("설정 삭제 오류:", error);
+                showNotification("설정 삭제 중 오류 발생.", 'error');
+             }
+        };
+        
+        // ====== Admin Login Logic (Demo) ======
+        
+        window.openLoginModal = () => {
+             window.shopState.isLoginModalOpen = true;
+             renderLoginModal();
+        };
+        
+        window.closeLoginModal = () => {
+             window.shopState.isLoginModalOpen = false;
+             renderLoginModal();
+        };
+
+        window.adminLogin = (event) => {
+            event.preventDefault();
+            const password = document.getElementById('admin-password').value;
+
+            if (password === ADMIN_PASSWORD) {
+                isAdmin = true;
+                window.closeLoginModal();
+                renderAdminDashboard();
+                document.getElementById('admin-login-btn').classList.add('hidden');
+                document.getElementById('admin-logout-btn').classList.remove('hidden');
+                showNotification("관리자로 로그인했습니다.", 'success');
+                renderShop();
+            } else {
+                showNotification("비밀번호가 틀렸습니다.", 'error');
+                document.getElementById('admin-password').value = '';
+            }
+        };
+        
+        window.adminLogout = () => {
+            isAdmin = false;
+            renderAdminDashboard();
+            document.getElementById('admin-login-btn').classList.remove('hidden');
+            document.getElementById('admin-logout-btn').classList.add('hidden');
+            showNotification("로그아웃했습니다.", 'info');
+            renderShop();
+        };
+
+        // ====== Modal Functions ======
+        
+        window.openModal = (product = null) => {
+            if (!isAdmin) return showNotification("관리자 권한이 없습니다.", 'error');
+            window.shopState.editingProduct = product;
+            window.shopState.isModalOpen = true;
+            renderProductModal();
+        };
+
+        window.closeModal = (id = 'product-modal') => {
+            window.shopState.isModalOpen = false;
+            window.shopState.editingProduct = null;
+            
+            const modal = document.getElementById(id);
+            if (modal) modal.classList.add('hidden');
+        };
+
+        // ====== UI Rendering Functions ======
+        
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            let bgColor;
+            
+            switch (type) {
+                case 'success': bgColor = 'bg-blue-600'; break; /* Toss-like Blue */
+                case 'error': bgColor = 'bg-red-600'; break;
+                case 'warning': bgColor = 'bg-yellow-600'; break;
+                case 'loading': bgColor = 'bg-gray-600'; break;
+                default: bgColor = 'bg-gray-500';
+            }
+            
+            notification.textContent = message;
+            notification.className = `fixed bottom-4 right-4 p-4 rounded-xl shadow-2xl text-white transition-opacity duration-300 z-[100] ${bgColor}`;
+            notification.classList.remove('opacity-0', 'hidden');
+
+            if (type !== 'loading') {
+                setTimeout(() => {
+                    notification.classList.add('opacity-0');
+                    setTimeout(() => notification.classList.add('hidden'), 300);
+                }, 3000);
+            }
+        }
+        
+        function showConfirmationModal(message, onConfirm) {
+            const modalHtml = `
+                <div id="confirm-modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white card-bg p-8 rounded-3xl shadow-2xl max-w-sm w-full transition-all">
+                        <h3 class="text-xl font-bold mb-4 text-red-600 dark:text-red-400">삭제 확인</h3>
+                        <p class="text-gray-700 dark:text-gray-300 mb-8">${message}</p>
+                        <div class="flex justify-end space-x-3">
+                            <button onclick="closeModal('confirm-modal')" class="px-4 py-3 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition">취소</button>
+                            <button id="confirm-modal-btn" class="px-4 py-3 text-white bg-red-600 rounded-xl hover:bg-red-700 transition font-semibold">삭제</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('modal-container').innerHTML += modalHtml;
+            document.getElementById('confirm-modal-btn').onclick = onConfirm;
+        }
+
+        /**
+         * 메인 상점 페이지 렌더링
+         */
+        function renderShop() {
+            const productsContainer = document.getElementById('products-container');
+            const categoryNav = document.getElementById('category-nav');
+            const sortControls = document.getElementById('sort-controls');
+            
+            const { products, categories, selectedCategory, sortKey, sortDirection } = window.shopState;
+            
+            if (!productsContainer) return;
+            
+            // 1. 카테고리 네비게이션 렌더링 (칩 스타일)
+            const categoryHtml = `
+                <button onclick="window.shopState.selectedCategory = 'all'; renderShop();" class="
+                    ${selectedCategory === 'all' 
+                        ? 'bg-indigo-600 text-white' 
+                        : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'} 
+                    px-4 py-2 rounded-full font-semibold text-sm hover:opacity-80 transition
+                ">전체</button>
+                ${categories.map(cat => {
+                    const isActive = selectedCategory === cat;
+                    return `
+                        <button onclick="window.shopState.selectedCategory = '${cat}'; renderShop();" class="
+                            ${isActive
+                                ? 'bg-indigo-600 text-white' 
+                                : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'} 
+                            px-4 py-2 rounded-full font-semibold text-sm hover:opacity-80 transition
+                        ">${cat}</button>
+                    `;
+                }).join('')}
+            `;
+            categoryNav.innerHTML = categoryHtml;
+
+            // 2. 정렬 컨트롤 렌더링
+            const sortOptions = [
+                { key: 'createdAt', label: '최신순' },
+                { key: 'price', label: '가격' },
+                { key: 'title', label: '상품명' },
+                { key: 'category', label: '카테고리' }
+            ];
+            
+            sortControls.innerHTML = `
+                <div class="flex items-center space-x-2">
+                    <label for="sort-key" class="text-sm font-medium text-gray-700 dark:text-gray-400">정렬:</label>
+                    <select id="sort-key" onchange="window.shopState.sortKey = this.value; renderShop();" class="p-2 border border-gray-300 dark:border-gray-600 rounded-xl dark:bg-gray-700 dark:text-white text-sm" value="${sortKey}">
+                        ${sortOptions.map(opt => `<option value="${opt.key}" ${sortKey === opt.key ? 'selected' : ''}>${opt.label}</option>`).join('')}
+                    </select>
+                    
+                    <button onclick="window.shopState.sortDirection = window.shopState.sortDirection === 'asc' ? 'desc' : 'asc'; renderShop();" 
+                            class="p-2 bg-gray-200 dark:bg-gray-700 rounded-xl text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition text-sm font-semibold">
+                        ${sortDirection === 'asc' ? '▲ 오름차순' : '▼ 내림차순'}
+                    </button>
+                </div>
+            `;
+            
+            // 3. 상품 필터링 및 정렬
+            let filteredProducts = selectedCategory === 'all' 
+                ? products 
+                : products.
