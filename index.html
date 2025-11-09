@@ -71,10 +71,9 @@
         </div>
     </div>
 
-    <!-- Firebase SDK (v12.5.0) -->
+    <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
-        import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-analytics.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, setPersistence, inMemoryPersistence } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
         import { 
             getFirestore, 
@@ -83,19 +82,23 @@
             setLogLevel
         } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
 
-        // Your web app's Firebase configuration
+        // Your web app's Firebase configuration (UPDATED)
         const firebaseConfig = {
-            apiKey: "AIzaSyApAC4rly7aG3nEyIBWuYC0AEPE_EENfpA",
-            authDomain: "bedrocklistkr-2572e.firebaseapp.com",
-            projectId: "bedrocklistkr-2572e",
-            storageBucket: "bedrocklistkr-2572e.firebasestorage.app",
-            messagingSenderId: "67413175419",
-            appId: "1:67413175419:web:c07e9667b5636ab55806de",
-            measurementId: "G-2HWJ0EE7SQ"
+            apiKey: "AIzaSyClzOguU5EBO6ooc9SJsL_1E2C6eVvO3s8",
+            authDomain: "bedrocklistkr.firebaseapp.com",
+            projectId: "bedrocklistkr",
+            storageBucket: "bedrocklistkr.firebasestorage.app",
+            messagingSenderId: "471153867181",
+            appId: "1:471153867181:web:41a7445930107755930924"
         };
 
-        const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
+        let app;
+        try {
+            app = initializeApp(firebaseConfig);
+        } catch (e) {
+            console.error("1. Firebase App 초기화 실패:", e);
+            document.getElementById('admin-message').textContent = 'Firebase 설정 오류. 콘솔 확인(단계 1).';
+        }
         
         let db, auth;
         let userId = null;
@@ -118,11 +121,11 @@
         // 관리자 로그인 로직
         adminLoginBtn.addEventListener('click', () => {
             if (adminPasswordInput.value === ADMIN_PASSWORD) {
-                adminLoginPanel.classList.add('hidden'); // 로그인 패널 숨기기
-                adminFormPanel.classList.remove('hidden'); // 폼 패널 보이기
+                adminLoginPanel.classList.add('hidden');
+                adminFormPanel.classList.remove('hidden');
                 adminMessage.textContent = '';
                 
-                // 로그인이 성공하면 Firebase 초기화
+                // 로그인이 성공하면 Firebase 초기화 시작
                 initializeFirebase();
             } else {
                 adminMessage.textContent = '비밀번호가 일치하지 않습니다.';
@@ -133,7 +136,7 @@
         addForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (!db || !userId) {
-                formMessage.textContent = '데이터베이스 연결을 확인해주세요. (인증 대기 중...)';
+                formMessage.textContent = '데이터베이스 연결을 확인해주세요.';
                 return;
             }
 
@@ -157,15 +160,15 @@
             formMessage.textContent = '';
 
             try {
-                const docRef = await addDoc(collection(db, firestoreCollectionPath), data);
+                await addDoc(collection(db, firestoreCollectionPath), data);
                 formMessage.textContent = `'${data.title}'이(가) 성공적으로 추가되었습니다!`;
                 formMessage.classList.remove('text-red-500');
                 formMessage.classList.add('text-green-600');
-                addForm.reset(); // 폼 초기화
+                addForm.reset();
                 
             } catch (error) {
                 console.error("데이터 추가 오류: ", error);
-                formMessage.textContent = '저장에 실패했습니다. 다시 시도해주세요.';
+                formMessage.textContent = '저장에 실패했습니다. (Firestore 규칙 문제일 수 있음)';
                 formMessage.classList.remove('text-green-600');
                 formMessage.classList.add('text-red-500');
             } finally {
@@ -174,36 +177,50 @@
             }
         });
 
-        // Firebase 초기화 및 인증
+        // Firebase 서비스 초기화 및 인증
         async function initializeFirebase() {
+            if (!app) {
+                adminMessage.textContent = 'Firebase 앱 초기화 실패로 진행 불가.';
+                return;
+            }
+
             try {
-                db = getFirestore(app);
+                // 2. Auth 서비스 초기화
                 auth = getAuth(app);
-                setLogLevel('Debug');
-
                 await setPersistence(auth, inMemoryPersistence);
-
+                
+                // 3. Firestore 서비스 초기화
+                db = getFirestore(app);
+                setLogLevel('Debug');
+                
+                // 4. 익명 인증
                 onAuthStateChanged(auth, (user) => {
                     if (user) {
                         console.log("익명 인증 성공:", user.uid);
                         userId = user.uid;
+                        adminMessage.textContent = '로그인 및 Firebase 연동 성공!';
+                        adminMessage.classList.remove('text-red-500');
+                        adminMessage.classList.add('text-green-600');
                     } else {
                         console.log("인증된 사용자가 없습니다.");
                         userId = null;
+                        adminMessage.textContent = '인증 실패. (Anonymous 인증 활성화 확인)';
+                        adminMessage.classList.add('text-red-500');
+                        adminMessage.classList.remove('text-green-600');
                     }
                 });
                 
                 await signInAnonymously(auth);
 
             } catch (error) {
-                console.error("Firebase 초기화 오류:", error);
-                formMessage.textContent = 'Firebase 초기화 실패. 콘솔 확인.';
+                console.error("Firebase 서비스 초기화 또는 익명 인증 오류:", error);
+                adminMessage.textContent = `Firebase 연동 중 오류 발생: ${error.message}. 콘솔 확인.`;
+                adminMessage.classList.add('text-red-500');
+                adminMessage.classList.remove('text-green-600');
             }
         }
-
-        // 페이지 로드 시가 아니라, 로그인 버튼 클릭 시 Firebase가 초기화되도록 변경함.
-
     </script>
 </body>
 </html>
+
 
